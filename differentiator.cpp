@@ -453,6 +453,10 @@ bool simplify(Expression& node) {
 // SERIALIZATION
 // *****************
 
+struct DeserializeException : std::logic_error {
+  explicit DeserializeException(const std::string& msg) : std::logic_error("Parse error! " + msg) {}
+};
+
 namespace ExpressionSerDe {
 
 template <class OutputIt>
@@ -555,13 +559,13 @@ double deserialize_double(InputIt begin, InputIt end) {
     size_t stod_length = 0;
     double deserialized = std::stod(str_double, &stod_length);
     if (stod_length != str_double.length()) {
-      throw std::invalid_argument("");
+      throw DeserializeException("");
     }
     return deserialized;
   } catch (const std::invalid_argument&) {
-    throw std::invalid_argument("Failed to convert '" + str_double + "' into double"); // TODO: custom exception
+    throw DeserializeException("failed to convert '" + str_double + "' into double"); // TODO: custom exception
   } catch (const std::out_of_range&) {
-    throw std::out_of_range("Number '" + str_double + "' is too big"); // TODO: custom exception
+    throw DeserializeException("number '" + str_double + "' is too big"); // TODO: custom exception
   }
 }
 
@@ -579,7 +583,7 @@ std::unique_ptr<Expression> deserialize_binary_operation(InputIt begin, InputIt 
   }
 
   if (it == end) {
-    throw std::invalid_argument("Unexpected end while parsing binary operation");
+    throw DeserializeException("unexpected end while parsing binary operation");
   }
 
   InputIt operation_sign_pos = it;
@@ -599,12 +603,12 @@ std::unique_ptr<Expression> deserialize_binary_operation(InputIt begin, InputIt 
       operation_type = OP_DIVIDE;
       break;
     default:
-      throw std::invalid_argument("'" + std::string(1, *it) + "' expected to be one of binary operations: +, -, *, /");
+      throw DeserializeException("'" + std::string(1, *it) + "' expected to be one of binary operations: +, -, *, /");
   }
 
   ++it;
   if (it == end || *it != '(') {
-    throw std::invalid_argument("Failed to find argument after binary operation '" + op_names[operation_type] + "'");
+    throw DeserializeException("failed to find argument after binary operation '" + op_names[operation_type] + "'");
   }
 
   balance = 1;
@@ -616,17 +620,17 @@ std::unique_ptr<Expression> deserialize_binary_operation(InputIt begin, InputIt 
   }
 
   if (balance != 0) {
-    throw std::invalid_argument("Unexpected end while parsing binary operation");
+    throw DeserializeException("unexpected end while parsing binary operation");
   }
 
   if (it != end) {
-    throw std::invalid_argument("Found useless characters after second argument");
+    throw DeserializeException("found useless characters after second argument");
   }
 
   auto arg1 = deserialize(begin + 1, operation_sign_pos - 1);
   auto arg2 = deserialize(operation_sign_pos + 2, end - 1);
   if (!arg1 || !arg2) {
-    throw std::invalid_argument("Missing argument for operator " + op_names[operation_type]);
+    throw DeserializeException("missing argument for operator " + op_names[operation_type]);
   }
   return std::make_unique<Expression>(operation_type, std::move(arg1), std::move(arg2));
 }
@@ -668,7 +672,7 @@ std::unique_ptr<Expression> deserialize(const InputIt begin, const InputIt end) 
   if (operation_type != OP_NONE) {
     auto arg = deserialize(begin + 4, end - 1);
     if (!arg) {
-      throw std::invalid_argument("Argument for " + op_names[operation_type] + " is missing");
+      throw DeserializeException("argument for " + op_names[operation_type] + " is missing");
     }
     return std::make_unique<Expression>(operation_type, std::move(arg));
   }
@@ -678,11 +682,10 @@ std::unique_ptr<Expression> deserialize(const InputIt begin, const InputIt end) 
     return std::make_unique<Expression>(*begin);
   }
 
-  throw std::invalid_argument("Failed to parse following: " + std::string(begin, end));
+  throw DeserializeException("failed to parse following: " + std::string(begin, end));
 
 
 }
-
 
 }
 
@@ -690,41 +693,29 @@ std::unique_ptr<Expression> deserialize(const InputIt begin, const InputIt end) 
 
 int main() {
 
-  /*auto v2 = std::make_unique<Mathematics::Expression>(1.);
-  auto v3 = std::make_unique<Mathematics::Expression>('x');
-  auto v1 = std::make_unique<Mathematics::Expression>(Mathematics::OP_ADD, std::move(v2), std::move(v3));
+  std::string input_expr;
+  std::cout << "Input your expression: ";
+  std::cin >> input_expr;
 
-  auto v1_ = v1->deep_copy();
+  std::unique_ptr<Mathematics::Expression> expr;
+  try {
+    expr = Mathematics::ExpressionSerDe::deserialize(input_expr.begin(), input_expr.end());
 
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*v1) << '\n';
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*v1_) << '\n';
-
-  auto s = std::move(v1) * std::move(v1_);
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*s) << '\n';
-
-  auto sin = Mathematics::sin(std::move(s));
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*sin) << '\n';
-
-  auto der = Mathematics::derive(*sin, 'x');
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*der) << '\n';
-
-  std::cout << Mathematics::simplify(*der) << '\n';
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*der) << '\n';*/
-
-  std::string str = "sin(((7)*(x))+(cos((5)*(5))))";
-
-  auto v = Mathematics::ExpressionSerDe::deserialize(str.begin(), str.end());
-  if (v != nullptr) {
-    std::cout << Mathematics::ExpressionSerDe::serialize_string(*v) << '\n';
+  } catch (const Mathematics::DeserializeException& e) {
+    std::cerr << e.what();
+    return 1;
   }
 
+  char w_respect_to;
+  std::cout << "Partial derivative with respect to variable: ";
+  std::cin >> w_respect_to;
 
-  Mathematics::simplify(*v);
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*v) << '\n';
+  auto der_expr = Mathematics::derive(*expr, w_respect_to);
+  Mathematics::simplify(*der_expr);
 
-  auto der = Mathematics::derive(*v, 'x');
-  Mathematics::simplify(*der);
-  std::cout << Mathematics::ExpressionSerDe::serialize_string(*der) << '\n';
+  auto der_expr_str = Mathematics::ExpressionSerDe::serialize_string(*der_expr);
+  std::cout << "Derivative: " << der_expr_str;
 
   return 0;
+  
 }
