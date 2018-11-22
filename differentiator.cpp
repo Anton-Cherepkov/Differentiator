@@ -4,6 +4,7 @@
 #include <limits>
 #include <memory>
 #include <cmath>
+#include <queue>
 
 namespace Mathematics {
 
@@ -687,6 +688,52 @@ std::unique_ptr<Expression> deserialize(const InputIt begin, const InputIt end) 
 
 }
 
+void visualize_tree(const Expression& node, const char* path) {
+  FILE *file = fopen(path, "w");
+  if (file == nullptr)
+  {
+    throw std::logic_error("k");
+  }
+  fprintf(file, "digraph G{\n");
+
+  std::queue<std::pair<const Expression*, int>> q;
+
+  q.push({&node, 1});
+  int id_last = 1;
+
+  while (!q.empty()) {
+    auto pair = q.front(); q.pop();
+    auto current_node = pair.first;
+    auto current_id   = pair.second;
+
+    switch (current_node->node_type_) {
+      case T_VARIABLE:
+        fprintf(file, "%d [label=\"%c\"]\n", current_id, current_node->variable_);
+        break;
+      case T_CONSTANT:
+        fprintf(file, "%d [label=\"%.1f\"]\n", current_id, current_node->constant_);
+        break;
+      case T_OPERATION: {
+        fprintf(file, "%d [label=\"%s\"]\n", current_id, op_names[current_node->operation_type_].c_str());
+
+        q.push({current_node->left_.get(), ++id_last});
+        fprintf(file, "%d -> %d\n", current_id, id_last);
+
+        if (has_arity(*current_node, 2)) {
+          q.push({current_node->right_.get(), ++id_last});
+          fprintf(file, "%d -> %d\n", current_id, id_last);
+        }
+        break;
+      }
+      default:
+        assert(false);
+    }
+  }
+
+  fprintf(file, "}");
+  fclose(file);
+}
+
 }
 
 }
@@ -700,9 +747,9 @@ int main() {
   std::unique_ptr<Mathematics::Expression> expr;
   try {
     expr = Mathematics::ExpressionSerDe::deserialize(input_expr.begin(), input_expr.end());
-
+    Mathematics::ExpressionSerDe::visualize_tree(*expr, "./graphs/expression.dot");
   } catch (const Mathematics::DeserializeException& e) {
-    std::cerr << e.what();
+    std::cerr << e.what() << "\n";
     return 1;
   }
 
@@ -711,11 +758,14 @@ int main() {
   std::cin >> w_respect_to;
 
   auto der_expr = Mathematics::derive(*expr, w_respect_to);
+  Mathematics::ExpressionSerDe::visualize_tree(*der_expr, "./graphs/derivative.dot");
+
   Mathematics::simplify(*der_expr);
+  Mathematics::ExpressionSerDe::visualize_tree(*der_expr, "./graphs/derivative_simplified.dot");
 
   auto der_expr_str = Mathematics::ExpressionSerDe::serialize_string(*der_expr);
-  std::cout << "Derivative: " << der_expr_str;
+  std::cout << "Derivative: " << der_expr_str << "\n";
 
   return 0;
-  
+
 }
